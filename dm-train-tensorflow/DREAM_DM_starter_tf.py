@@ -6,7 +6,7 @@ import numpy as np
 from os import listdir, remove, mkdir
 from os.path import isfile, join, isdir
 import scipy.misc
-from sklearn.cross_validation import train_test_split
+from sklearn.model_selection import StratifiedShuffleSplit
 import tensorflow as tf
 import tflearn
 import sys
@@ -151,6 +151,118 @@ def read_in_one_image(path_img, name_img, matrix_size, data_aug=False):
     right_bound = np.random.choice(174)
     img[up_bound:(up_bound+50), right_bound:(right_bound+50)] = 0.0
     return img
+
+def read_in_one_meta(path_img, subjectID):
+    temp = np.zeros(44)
+    
+    with open(path_img, 'r') as file_metadata:
+        reader_metadata = csv.reader(file_metadata, delimiter='\t')
+        for row in reader_metadata:
+            if row[0] == subjectID:
+                if row[2] != '.':
+                    temp[0] = float(row[2])
+
+                if row[7] != '.':
+                    temp[1] = float(row[7])
+                
+                if row[8] == '0':
+                    temp[2:5] = [1,0,0]
+                elif row[8] == '1':
+                    temp[2:5] = [0,1,0]
+                else:
+                    temp[2:5] = [0,0,1]
+
+                if row[9] == '2':
+                    temp[5:9] = [1,0,0,0]
+                elif row[9] == '4':
+                    temp[5:9] = [0,1,0,0]
+                elif row[9] == '5':
+                    temp[5:9] = [0,0,1,0]
+                else:
+                    temp[5:9] = [0,0,0,1]
+
+                if row[10] == '0':
+                    temp[9:11] = [1,0]
+                else:
+                    temp[9:11] = [0,1]
+
+                if row[11] != '.':
+                    temp[11] = float(row[11])
+
+                if row[12] == '1':
+                    temp[12:16] = [1,0,0,0]
+                elif row[12] == '2':
+                    temp[12:16] = [0,1,0,0]
+                elif row[12] == '3':
+                    temp[12:16] = [0,0,1,0]
+                else:
+                    temp[12:16] = [0,0,0,1]
+
+                if row[13] == '0':
+                    temp[16:19] = [1,0,0]
+                elif row[13] == '1':
+                    temp[16:19] = [0,1,0]
+                else:
+                    temp[16:19] = [0,0,1]
+
+                if row[14] == '1':
+                    temp[19:23] = [1,0,0,0]
+                elif row[14] == '2':
+                    temp[19:23] = [0,1,0,0]
+                elif row[14] == '4':
+                    temp[19:23] = [0,0,1,0]
+                else:
+                    temp[19:23] = [0,0,0,1]
+
+                if row[15] == '0':
+                    temp[23:26] = [1,0,0]
+                elif row[15] == '1':
+                    temp[23:26] = [0,1,0]
+                else:
+                    temp[23:26] = [0,0,1]
+
+                if row[16] == '0':
+                    temp[26:29] = [1,0,0]
+                elif row[16] == '1':
+                    temp[26:29] = [0,1,0]
+                else:
+                    temp[26:29] = [0,0,1]
+
+                if row[17] == '0':
+                    temp[29:32] = [1,0,0]
+                elif row[17] == '1':
+                    temp[29:32] = [0,1,0]
+                else:
+                    temp[29:32] = [0,0,1]
+
+                if row[18] == '0':
+                    temp[32:35] = [1,0,0]
+                elif row[18] == '1':
+                    temp[32:35] = [0,1,0]
+                else:
+                    temp[32:35] = [0,0,1]
+
+                if row[19] != '.':
+                    temp[35] = float(row[19])
+
+                if row[20] == '2':
+                    temp[36:] = [1,0,0,0,0,0,0,0]
+                elif row[20] == '3':
+                    temp[36:] = [0,1,0,0,0,0,0,0]
+                elif row[20] == '4':
+                    temp[36:] = [0,0,1,0,0,0,0,0]
+                elif row[20] == '5':
+                    temp[36:] = [0,0,0,1,0,0,0,0]
+                elif row[20] == '6':
+                    temp[36:] = [0,0,0,0,1,0,0,0]
+                elif row[20] == '7':
+                    temp[36:] = [0,0,0,0,0,1,0,0]
+                elif row[20] == '8':
+                    temp[36:] = [0,0,0,0,0,0,1,0]
+                else:
+                    temp[36:] = [0,0,0,0,0,0,0,1]
+
+    return temp
     
 def conv2d(l_input, filt_size, filt_num, stride=1, alpha=0.1, name="conv2d", norm="bn"):
     """
