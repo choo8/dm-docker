@@ -360,7 +360,7 @@ def dense(l_input, hidden_size, keep_prob, alpha=0.1, name="dense"):
     relu_layer = tf.maximum(dropout_layer, dropout_layer*alpha)
     return relu_layer
 
-def output(l_input, output_size, name="output"):
+def output(l_input, wideX, output_size, name="output"):
     """
     Output layer.  Just a simple affine transformation.
     INPUTS:
@@ -374,14 +374,15 @@ def output(l_input, output_size, name="output"):
     for iter_size in range(1, len(input_size)):
         reshape_size *= input_size[iter_size]
     reshape_layer = tf.reshape(l_input, [-1, reshape_size])
+    new_layer = tf.concat(1, [wideX, reshape_layer])
     # Creating and Doing Affine Transformation
-    weight_shape = [reshape_layer.get_shape().as_list()[1], output_size]
+    weight_shape = [reshape_layer.get_shape().as_list()[1] + wideX.get_shape().as_list()[1], output_size]
     std = 0.01#np.sqrt(2.0 / reshape_layer.get_shape().as_list()[1])
     with tf.variable_scope(name+"_output_weights"):
         W = tf.get_variable("W", weight_shape, initializer=tf.random_normal_initializer(stddev=std))
         b = tf.get_variable("b", output_size, initializer=tf.constant_initializer(0.0))
     tf.add_to_collection("reg_variables", W)
-    affine_layer = tf.matmul(reshape_layer, W) + b
+    affine_layer = tf.matmul(new_layer, W) + b
     return affine_layer
 
 def get_L2_loss(reg_param, key="reg_variables"):
@@ -504,7 +505,7 @@ def GoogLe_conv(layer, b_name="", norm="bn"):
     pool5 = tf.nn.avg_pool(incept5b, ksize=[1,size_pool,size_pool,1], strides=[1,1,1,1], padding='VALID')
     return pool5
 
-def Le_Net(X, output_size, keep_prob=1.0, name=""):
+def Le_Net(X, wideX, output_size, keep_prob=1.0, name=""):
     """
     Very Simple Lenet
     INPUTS:
@@ -518,7 +519,7 @@ def Le_Net(X, output_size, keep_prob=1.0, name=""):
     conv2 = conv2d(pool1, 3, 16, stride=1, name=name+"conv2", norm="bn")
     pool2 = max_pool(conv2, k=2, stride=2)
     dense1 = dense(pool2, 120, keep_prob, name=name+"dense1")
-    return output(dense1, output_size, name=name+"output")
+    return output(dense1, wideX, output_size, name=name+"output")
 
 def GoogLe_Net(X, output_size, keep_prob=1.0, name=""):
     """
@@ -603,7 +604,7 @@ def test_out(sess, list_dims, list_placeholders, list_operations, X_te, opts):
         #super_print(statement, f)
     f.close()
 
-def test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, opts):
+def test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, opts, data_dict):
     """
     This code is to call a test on the validation set.
     INPUTS:
@@ -617,24 +618,28 @@ def test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, op
     """
     # Let's unpack the lists.
     matrix_size, num_channels = list_dims
-    x, y, keep_prob = list_placeholders
+    widex, x, y, keep_prob = list_placeholders
     prob, pred, saver, L2_loss, CE_loss, cost, optimizer, accuracy, init = list_operations
     # Initializing what to put in.
     loss_te = 0.0
     acc_te = 0.0
+    wideXX = np.zeros((1, 44), dtype=np.float32)
     dataXX = np.zeros((1, matrix_size, matrix_size, num_channels), dtype=np.float32)
     dataYY = np.zeros((1, ), dtype=np.int64)
     # Running through all test data points
-    v_TP = 0.0
+    with tf.name_scope('v_TP'):
+        v_TP = 0.0
     v_FP = 0.0
     v_FN = 0.0
     v_TN = 0.0
+
     for iter_data in range(len(X_te)):
         # Reading in the data
+        wideXX[0] = read_in_one_meta(opts.csv2, data_dict[X_te[iter_data]][0])
         dataXX[0, :, :, 0] = read_in_one_image(opts.path_data, X_te[iter_data], matrix_size)
         dataYY[0] = Y_te[iter_data]
         tflearn.is_training(False)
-        loss_iter, acc_iter = sess.run((cost, accuracy), feed_dict={x: dataXX, y: dataYY, keep_prob: 1.0})
+        loss_iter, acc_iter = sess.run((cost, accuracy), feed_dict={widex: wideXX, x: dataXX, y: dataYY, keep_prob: 1.0})
         # Figuring out the ROC stuff
         if Y_te[iter_data] == 1:
             if acc_iter == 1:
@@ -651,7 +656,7 @@ def test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, op
         acc_te += acc_iter / len(X_te)
     return (loss_te, acc_te, [v_TP, v_FP, v_TN, v_FN])
 
-def train_one_iteration(sess, list_dims, list_placeholders, list_operations, X_tr, Y_tr, opts):
+def train_one_iteration(sess, list_dims, list_placeholders, list_operations, summary_op, X_tr, Y_tr, opts, data_dict):
     """
     Basically, run one iteration of the training.
     INPUTS:
@@ -665,21 +670,31 @@ def train_one_iteration(sess, list_dims, list_placeholders, list_operations, X_t
     """
     # Let's unpack the lists.
     matrix_size, num_channels = list_dims
-    x, y, keep_prob = list_placeholders
+    widex, x, y, keep_prob = list_placeholders
     prob, pred, saver, L2_loss, CE_loss, cost, optimizer, accuracy, init = list_operations
     # Initializing what to put in.
+    wideXX = np.zeros((opts.bs, 44), dtype=np.float32)
     dataXX = np.zeros((opts.bs, matrix_size, matrix_size, num_channels), dtype=np.float32)
     dataYY = np.zeros((opts.bs, ), dtype=np.int64)
-    ind_list = np.random.choice(range(len(X_tr)), opts.bs, replace=False)
+
+    ind_pos = [i for i,j in enumerate(Y_tr) if j == 1]
+    ind_neg = [i for i,j in enumerate(Y_tr) if j == 0]
+
+    ind_pos_val = [i for i in np.random.choice(ind_pos, int(math.ceil(opts.bs/2)), replace=True)]
+    ind_neg_val = [i for i in np.random.choice(ind_neg, int(math.floor(opts.bs/2)), replace=True)]
+    ind_list = ind_pos_val + ind_neg_val
+
     # Fill in our dataXX and dataYY for training one batch.
     for iter_data,ind in enumerate(ind_list):
+        wideXX[iter_data] = read_in_one_meta(opts.csv2, data_dict[X_tr[ind]][0])
         dataXX[iter_data, :, :, 0] = read_in_one_image(opts.path_data, X_tr[ind], matrix_size, data_aug=False)
         dataYY[iter_data] = Y_tr[ind]
+    
     tflearn.is_training(True)
-    _, loss_iter, acc_iter = sess.run((optimizer, cost, accuracy), feed_dict={x: dataXX, y: dataYY, keep_prob: opts.dropout})
-    return (loss_iter, acc_iter)
+    _, loss_iter, acc_iter, summary = sess.run((optimizer, cost, accuracy, summary_op), feed_dict={widex: wideXX, x: dataXX, y: dataYY, keep_prob: opts.dropout})
+    return (loss_iter, acc_iter, summary)
 
-def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
+def train_net(X_tr, X_te, Y_tr, Y_te, opts, f, data_dict):
     """
     Training of the net.  All we need is data names and parameters.
     INPUTS:
@@ -690,6 +705,8 @@ def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
     - opts: parsed argument thing
     - f: (opened file) for output writing
     """
+    # Log path
+    logs_path = "./modelState/log"
     # Setting the size and number of channels of input.
     matrix_size = opts.matrix_size
     num_channels = 1
@@ -698,18 +715,20 @@ def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
     data_count = len(X_tr)
     iter_count = int(np.ceil(float(opts.epoch) * data_count / opts.bs))
     epoch_every = int(np.ceil(float(iter_count) / opts.epoch))
-    print_every = min([100, epoch_every])
+    print_every = min([10, epoch_every])
     max_val_acc = 0.0
     # Creating Placeholders
+    widex = tf.placeholder(tf.float32, [None, 44])
     x = tf.placeholder(tf.float32, [None, matrix_size, matrix_size, num_channels])
     y = tf.placeholder(tf.int64)
     keep_prob = tf.placeholder(tf.float32)
-    list_placeholders = [x, y, keep_prob]
+    list_placeholders = [widex, x, y, keep_prob]
     # Create the network
     if opts.net == "Alex":
         pred = Alex_Net(x, 2, keep_prob=keep_prob)
     elif opts.net == "Le":
-        pred = Le_Net(x, 2, keep_prob=keep_prob)
+        pred = Le_Net(x, widex, 2, keep_prob=keep_prob)
+        combine_out = tf.concat(1, [widex, pred])
     elif opts.net == "VGG16":
         pred = VGG16_Net(x, 2, keep_prob=keep_prob)
     elif opts.net == "GoogLe":
@@ -720,19 +739,40 @@ def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
         return 0
     # Define Operations in TF Graph
     saver = tf.train.Saver()
-    L2_loss = get_L2_loss(opts.reg)
-    CE_loss = get_CE_loss(pred, y)
-    cost = L2_loss + CE_loss
-    prob = tf.nn.softmax(pred)
+    with tf.name_scope('L2_loss'):
+        L2_loss = get_L2_loss(opts.reg)
+    with tf.name_scope('CE_loss'):
+        CE_loss = get_CE_loss(pred, y)
+    with tf.name_scope('Total_loss'):
+        cost = L2_loss + CE_loss
+
+    combine_weight = tf.get_variable("combine_weight", [46, 2], initializer=tf.random_normal_initializer(stddev=0.01))
+    pred_final = tf.matmul(combine_out, combine_weight)
+
+    prob = tf.nn.softmax(pred_final)
     optimizer = get_optimizer(cost, lr=opts.lr, decay=opts.decay, epoch_every=epoch_every)
-    accuracy = get_accuracy(pred, y)
+
+    with tf.name_scope('Accuracy'):
+        accuracy = get_accuracy(pred, y)
+
     init = tf.initialize_all_variables()
     list_operations = [prob, pred, saver, L2_loss, CE_loss, cost, optimizer, accuracy, init]
+
+
+    tf.scalar_summary("L2_loss", L2_loss)
+    tf.scalar_summary("CE_loss", CE_loss)
+    tf.scalar_summary("Accuracy", accuracy)
+    summary_op = tf.merge_all_summaries()
+
     # Do the Training
     print "Training Started..."
     start_time = time.time()
     with tf.Session() as sess:
         sess.run(init)
+
+        # create log writer object
+        writer = tf.train.SummaryWriter(logs_path, graph=tf.get_default_graph())
+
         loss_tr = 0.0
         acc_tr = 0.0
         if opts.test:
@@ -740,12 +780,15 @@ def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
             test_out(sess, list_dims, list_placeholders, list_operations, X_te, opts)
             return 0
         for iter in range(iter_count):
-            loss_temp, acc_temp = train_one_iteration(sess, list_dims, list_placeholders, list_operations, X_tr, Y_tr, opts)
+            loss_temp, acc_temp, summary = train_one_iteration(sess, list_dims, list_placeholders, list_operations, summary_op, X_tr, Y_tr, opts, data_dict)
+
+            writer.add_summary(summary, opts.epoch * opts.bs + iter)
+            
             loss_tr += loss_temp / print_every
             acc_tr += acc_temp / print_every
             if ((iter)%print_every) == 0:
                 current_time = time.time()
-                loss_te, acc_te, ROC_values = test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, opts)
+                loss_te, acc_te, ROC_values = test_all(sess, list_dims, list_placeholders, list_operations, X_te, Y_te, opts,data_dict)
                 # Printing out stuff
                 statement = "    Iter"+str(iter+1)+": "+str((current_time - start_time)/60)
                 statement += ", Acc_tr: "+str(acc_tr)
@@ -757,6 +800,10 @@ def train_net(X_tr, X_te, Y_tr, Y_te, opts, f):
                 statement += ", False_Positive: "+str(ROC_values[1])
                 statement += ", True_Negative: "+str(ROC_values[2])
                 statement += ", False_Negative: "+str(ROC_values[3])
+                statement += ", Number of Training Examples: "+str(len(Y_tr))
+                statement += ", Number of Positive Training Examples: "+str(sum(Y_tr))
+                statement += ", Number of Test Examples: "+str(len(Y_te))
+                statement += ", Number of Positive Test Examples: "+str(sum(Y_te))
                 super_print(statement, f)
                 loss_tr = 0.0
                 acc_tr = 0.0
