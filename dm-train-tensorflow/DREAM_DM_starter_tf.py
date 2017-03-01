@@ -263,7 +263,17 @@ def read_in_one_meta(path_img, subjectID):
                     temp[36:] = [0,0,0,0,0,0,0,1]
 
     return temp
-    
+
+def get_covariance(X, opts, data_dict):
+    full_widex = []
+
+    for element in X:
+        full_widex.append(read_in_one_meta(opts.csv2, data_dict[element][0]))
+
+    full_widex = np.asarray(full_widex)
+
+    return np.dot(np.transpose(full_widex), full_widex) / full_widex.shape[0]
+
 def conv2d(l_input, filt_size, filt_num, stride=1, alpha=0.1, name="conv2d", norm="bn"):
     """
     A simple 2-dimensional convolution layer.
