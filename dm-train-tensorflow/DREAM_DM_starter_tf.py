@@ -274,6 +274,21 @@ def get_covariance(X, opts, data_dict):
 
     return np.dot(np.transpose(full_widex), full_widex) / full_widex.shape[0]
 
+def augment_data(img):
+    # Randomly do small translations or rotations to the training data
+    if np.random.randint(2) == 0:
+        if np.random.randint(2) == 0:
+            temp = np.roll(img, int(img.shape[0]*0.01), axis=0)
+        else:
+            temp = np.roll(img, int(img.shape[1]*0.01), axis=1)
+    else:
+        if np.random.randint(2) == 0:
+            temp = scipy.ndimage.interpolation.rotate(img, 3, reshape=False)
+        else:
+            temp = scipy.ndimage.interpolation.rotate(img, -3, reshape=False)
+
+    return temp
+
 def conv2d(l_input, filt_size, filt_num, stride=1, alpha=0.1, name="conv2d", norm="bn"):
     """
     A simple 2-dimensional convolution layer.
